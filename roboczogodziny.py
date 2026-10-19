@@ -64,11 +64,10 @@ def init_db():
             FOREIGN KEY (zlecenie_id) REFERENCES zlecenia (id) ON DELETE CASCADE
         )
     """)
-  # Bezpieczne dodanie kolumny data_pracy, jeśli baza już istniała wcześniej
   try:
     cursor.execute("ALTER TABLE pozycje_prac ADD COLUMN data_pracy TEXT;")
   except sqlite3.OperationalError:
-    pass  # Kolumna już istnieje
+    pass
     
   conn.commit()
   conn.close()
@@ -446,6 +445,7 @@ edited_df = st.data_editor(
     },
 )
 
+# Automatyczne uzupełnianie brakujących danych w nowych wierszach (puste stawki, godziny lub daty)
 for i, row in edited_df.iterrows():
   if pd.isna(row['Data']):
     edited_df.at[i, 'Data'] = datetime.now().date()
@@ -453,13 +453,19 @@ for i, row in edited_df.iterrows():
     try:
       edited_df.at[i, 'Data'] = datetime.strptime(row['Data'], "%Y-%m-%d").date()
     except:
-      pass
+      edited_df.at[i, 'Data'] = datetime.now().date()
+
+  if pd.isna(row['Godziny']) or row['Godziny'] == "":
+    edited_df.at[i, 'Godziny'] = 0.0
+
+  if pd.isna(row['Stawka']) or row['Stawka'] == "" or row['Stawka'] == 0:
+    edited_df.at[i, 'Stawka'] = default_rate
 
 st.session_state['tasks_list'] = edited_df.to_dict('records')
 
-# Podsumowanie
-total_hours = edited_df['Godziny'].sum() if not edited_df.empty else 0.0
-total_amount = (edited_df['Godziny'] * edited_df['Stawka']).sum() if not edited_df.empty else 0.0
+# Podsumowanie z bezpieczną konwersją typów liczbowych
+total_hours = pd.to_numeric(edited_df['Godziny'], errors='coerce').sum() if not edited_df.empty else 0.0
+total_amount = (pd.to_numeric(edited_df['Godziny'], errors='coerce') * pd.to_numeric(edited_df['Stawka'], errors='coerce')).sum() if not edited_df.empty else 0.0
 
 st.markdown("### Podsumowanie")
 mcol1, mcol2 = st.columns(2)
@@ -495,9 +501,11 @@ with col_btn1:
     for row in st.session_state['tasks_list']:
       if str(row['Zakres prac']).strip() != "":
         d_val = row['Data'].strftime("%Y-%m-%d") if isinstance(row['Data'], (datetime, date)) else str(row['Data'])
+        r_stawka = float(row['Stawka']) if row['Stawka'] else default_rate
+        r_godziny = float(row['Godziny']) if row['Godziny'] else 0.0
         cursor.execute(
             """INSERT INTO pozycje_prac (zlecenie_id, data_pracy, zakres_prac, godziny, stawka) VALUES (?, ?, ?, ?, ?)""",
-            (zlecenie_id, d_val, row['Zakres prac'], float(row['Godziny']), float(row['Stawka'])),
+            (zlecenie_id, d_val, row['Zakres prac'], r_godziny, r_stawka),
         )
 
     conn.commit()
@@ -513,11 +521,13 @@ with col_btn2:
       tasks_for_pdf = []
       for row in st.session_state['tasks_list']:
         d_val = row['Data'].strftime("%Y-%m-%d") if isinstance(row['Data'], (datetime, date)) else str(row['Data'])
+        r_stawka = float(row['Stawka']) if row['Stawka'] else default_rate
+        r_godziny = float(row['Godziny']) if row['Godziny'] else 0.0
         tasks_for_pdf.append({
             "Data": d_val,
             "Zakres prac": row['Zakres prac'],
-            "Godziny": row['Godziny'],
-            "Stawka": row['Stawka']
+            "Godziny": r_godziny,
+            "Stawka": r_stawka
         })
 
       client_data = {
@@ -531,7 +541,7 @@ with col_btn2:
       pdf_bytes = generate_pdf(
           client_data,
           tasks_for_pdf,
-            total_hours,
+          total_hours,
           total_amount,
           default_rate,
       )
