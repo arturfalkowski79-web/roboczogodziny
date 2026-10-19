@@ -38,7 +38,7 @@ except Exception:
   pass
 
 
-# Inicjalizacja bazy danych SQLite
+# Inicjalizacja bazy danych SQLite z automatyczną aktualizacją struktur
 def init_db():
   conn = sqlite3.connect(DB_NAME)
   cursor = conn.cursor()
@@ -64,6 +64,12 @@ def init_db():
             FOREIGN KEY (zlecenie_id) REFERENCES zlecenia (id) ON DELETE CASCADE
         )
     """)
+  # Bezpieczne dodanie kolumny data_pracy, jeśli baza już istniała wcześniej
+  try:
+    cursor.execute("ALTER TABLE pozycje_prac ADD COLUMN data_pracy TEXT;")
+  except sqlite3.OperationalError:
+    pass  # Kolumna już istnieje
+    
   conn.commit()
   conn.close()
 
@@ -525,7 +531,7 @@ with col_btn2:
       pdf_bytes = generate_pdf(
           client_data,
           tasks_for_pdf,
-          total_hours,
+            total_hours,
           total_amount,
           default_rate,
       )
