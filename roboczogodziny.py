@@ -432,6 +432,10 @@ if 'Godziny' not in df_tasks.columns:
   df_tasks['Godziny'] = 0.0
 if 'Stawka' not in df_tasks.columns:
   df_tasks['Stawka'] = default_rate
+else:
+  # Automatyczne uzupełnienie brakujących stawek domyślną stawką przed wyświetleniem w tabeli
+  df_tasks['Stawka'] = df_tasks['Stawka'].fillna(default_rate)
+  df_tasks['Stawka'] = df_tasks['Stawka'].replace(0, default_rate)
 
 edited_df = st.data_editor(
     df_tasks,
@@ -445,7 +449,7 @@ edited_df = st.data_editor(
     },
 )
 
-# Automatyczne uzupełnianie brakujących danych w nowych wierszach (puste stawki, godziny lub daty)
+# Walidacja i czyszczenie danych po edycji
 for i, row in edited_df.iterrows():
   if pd.isna(row['Data']):
     edited_df.at[i, 'Data'] = datetime.now().date()
@@ -523,34 +527,4 @@ with col_btn2:
         d_val = row['Data'].strftime("%Y-%m-%d") if isinstance(row['Data'], (datetime, date)) else str(row['Data'])
         r_stawka = float(row['Stawka']) if row['Stawka'] else default_rate
         r_godziny = float(row['Godziny']) if row['Godziny'] else 0.0
-        tasks_for_pdf.append({
-            "Data": d_val,
-            "Zakres prac": row['Zakres prac'],
-            "Godziny": r_godziny,
-            "Stawka": r_stawka
-        })
-
-      client_data = {
-          "project_name": project_name,
-          "client_name": client_name,
-          "address": address,
-          "date": order_date,
-          "notes": notes,
-      }
-
-      pdf_bytes = generate_pdf(
-          client_data,
-          tasks_for_pdf,
-          total_hours,
-          total_amount,
-          default_rate,
-      )
-
-      st.success("Dokument PDF został wygenerowany pomyślnie!")
-      st.download_button(
-          label="📥 Pobierz kartę prac (PDF)",
-          data=pdf_bytes,
-          file_name=f"Ewidencja_Roboczogodzin_{project_name.replace(' ', '_')}.pdf",
-          mime="application/pdf",
-          use_container_width=True,
-      )
+        tasks
