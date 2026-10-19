@@ -332,6 +332,19 @@ for z in zlecenia_list:
 selected_zlecenie_label = st.sidebar.selectbox("Wybierz zapisane zlecenie:", list(zlecenia_options.keys()))
 selected_zlecenie_id = zlecenia_options[selected_zlecenie_label]
 
+# Przycisk usuwania zlecenia w sidebarze (jeśli wybrano istniejące zlecenie)
+if selected_zlecenie_id is not None:
+  if st.sidebar.button("🗑️ Usuń to zlecenie z bazy", type="primary"):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM zlecenia WHERE id = ?", (selected_zlecenie_id,))
+    cursor.execute("DELETE FROM pozycje_prac WHERE zlecenie_id = ?", (selected_zlecenie_id,))
+    conn.commit()
+    conn.close()
+    st.sidebar.success("Zlecenie zostało usunięte!")
+    st.session_state['loaded_zlecenie_id'] = None
+    st.rerun()
+
 # Inicjalizacja stanu sesji
 if 'loaded_zlecenie_id' not in st.session_state:
   st.session_state['loaded_zlecenie_id'] = None
@@ -433,7 +446,6 @@ if 'Godziny' not in df_tasks.columns:
 if 'Stawka' not in df_tasks.columns:
   df_tasks['Stawka'] = default_rate
 else:
-  # Automatyczne uzupełnienie brakujących stawek domyślną stawką przed wyświetleniem w tabeli
   df_tasks['Stawka'] = df_tasks['Stawka'].fillna(default_rate)
   df_tasks['Stawka'] = df_tasks['Stawka'].replace(0, default_rate)
 
@@ -449,7 +461,6 @@ edited_df = st.data_editor(
     },
 )
 
-# Walidacja i czyszczenie danych po edycji
 for i, row in edited_df.iterrows():
   if pd.isna(row['Data']):
     edited_df.at[i, 'Data'] = datetime.now().date()
@@ -467,7 +478,6 @@ for i, row in edited_df.iterrows():
 
 st.session_state['tasks_list'] = edited_df.to_dict('records')
 
-# Podsumowanie z bezpieczną konwersją typów liczbowych
 total_hours = pd.to_numeric(edited_df['Godziny'], errors='coerce').sum() if not edited_df.empty else 0.0
 total_amount = (pd.to_numeric(edited_df['Godziny'], errors='coerce') * pd.to_numeric(edited_df['Stawka'], errors='coerce')).sum() if not edited_df.empty else 0.0
 
@@ -480,7 +490,6 @@ with mcol2:
 
 st.divider()
 
-# Przyciski akcji: Zapis do bazy oraz Generowanie PDF
 col_btn1, col_btn2 = st.columns(2)
 
 with col_btn1:
@@ -527,4 +536,34 @@ with col_btn2:
         d_val = row['Data'].strftime("%Y-%m-%d") if isinstance(row['Data'], (datetime, date)) else str(row['Data'])
         r_stawka = float(row['Stawka']) if row['Stawka'] else default_rate
         r_godziny = float(row['Godziny']) if row['Godziny'] else 0.0
-        tasks
+        tasks_for_pdf.append({
+            "Data": d_val,
+            "Zakres prac": row['Zakres prac'],
+            "Godziny": r_godziny,
+            "Stawka": r_stawka
+        })
+
+      client_data = {
+          "project_name": project_name,
+          "client_name": client_name,
+          "address": address,
+          "date": order_date,
+          "notes": notes,
+      }
+
+      pdf_bytes = generate_pdf(
+          client_data,
+          tasks_for_pdf,
+          total_hours,
+          total_amount,
+          default_rate,
+      )
+
+      st.success("Dokument PDF został wygenerowany pomyślnie!")
+      st.download_button(
+          label="📥 Pobierz kartę prac (PDF)",
+          data=pdf_bytes,
+          file_name=f"Ewidencja_Roboczogodzin_{project_name.replace(' ', '_')}.pdf",
+          mime="application/pdf",
+          use_container_width=True,
+      )
