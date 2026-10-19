@@ -1,10 +1,13 @@
 from datetime import datetime, date
 import io
+import os
 import sqlite3
 import pandas as pd
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 import streamlit as st
@@ -18,12 +21,28 @@ st.set_page_config(
 
 DB_NAME = "roboczogodziny.db"
 
+# Rejestracja czcionki Roboto z repozytorium dla poprawnych polskich znaków w PDF
+FONT_NAME = "Helvetica"
+FONT_BOLD_NAME = "Helvetica-Bold"
+
+try:
+  if os.path.exists("Roboto.ttf"):
+    pdfmetrics.registerFont(TTFont("Roboto", "Roboto.ttf"))
+    FONT_NAME = "Roboto"
+    # Jeśli mamy osobną pogrubioną Roboto lub używamy tej samej
+    if os.path.exists("Roboto-Bold.ttf"):
+      pdfmetrics.registerFont(TTFont("Roboto-Bold", "Roboto-Bold.ttf"))
+      FONT_BOLD_NAME = "Roboto-Bold"
+    else:
+      FONT_BOLD_NAME = "Roboto"
+except Exception:
+  pass
+
 
 # Inicjalizacja bazy danych SQLite
 def init_db():
   conn = sqlite3.connect(DB_NAME)
   cursor = conn.cursor()
-  # Tabela zleceń (nagłówek)
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS zlecenia (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +54,6 @@ def init_db():
             notes TEXT
         )
     """)
-  # Tabela pozycji prac dla zleceń (dodano kolumnę data_pracy)
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS pozycje_prac (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +93,7 @@ class NumberedCanvas(canvas.Canvas):
 
   def draw_page_number(self, page_count):
     self.saveState()
-    self.setFont("Helvetica", 8)
+    self.setFont(FONT_NAME, 8)
     self.setFillColorRGB(0.3, 0.3, 0.3)
     footer_text = (
         f"Strona {self._pageNumber} z {page_count}  |  Dokument wygenerowany"
@@ -96,7 +114,7 @@ def generate_pdf(
       rightMargin=2 * cm,
       leftMargin=2 * cm,
       topMargin=2 * cm,
-      bottomMargin=2.5 * cm,
+      bottomMargin=2.0 * cm,
   )
 
   story = []
@@ -105,7 +123,7 @@ def generate_pdf(
   title_style = ParagraphStyle(
       'DocTitle',
       parent=styles['Heading1'],
-      fontName='Helvetica-Bold',
+      fontName=FONT_BOLD_NAME,
       fontSize=18,
       leading=22,
       textColor='#1e293b',
@@ -115,7 +133,7 @@ def generate_pdf(
   subtitle_style = ParagraphStyle(
       'DocSubtitle',
       parent=styles['Normal'],
-      fontName='Helvetica',
+      fontName=FONT_NAME,
       fontSize=10,
       leading=14,
       textColor='#64748b',
@@ -124,7 +142,7 @@ def generate_pdf(
   section_header = ParagraphStyle(
       'SectionHeader',
       parent=styles['Heading2'],
-      fontName='Helvetica-Bold',
+      fontName=FONT_BOLD_NAME,
       fontSize=12,
       leading=16,
       textColor='#0f172a',
@@ -135,7 +153,7 @@ def generate_pdf(
   cell_style = ParagraphStyle(
       'CellText',
       parent=styles['Normal'],
-      fontName='Helvetica',
+      fontName=FONT_NAME,
       fontSize=9,
       leading=12,
       textColor='#1e293b',
@@ -144,7 +162,7 @@ def generate_pdf(
   cell_header_style = ParagraphStyle(
       'CellHeaderText',
       parent=styles['Normal'],
-      fontName='Helvetica-Bold',
+      fontName=FONT_BOLD_NAME,
       fontSize=9,
       leading=12,
       textColor='#ffffff',
@@ -155,8 +173,8 @@ def generate_pdf(
       'CellHeaderRight', parent=cell_header_style, alignment=2
   )
 
-  # Nagłówek dokumentu
-  story.append(Paragraph("KARTA PRAC I ROZLICZENIE ROBOCZOGODZIN", title_style))
+  # Nagłówek dokumentu - zmieniony tytuł
+  story.append(Paragraph("Ewidencja Roboczogodzin", title_style))
   story.append(
       Paragraph(
           f"Data generowania: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
@@ -252,7 +270,7 @@ def generate_pdf(
           Paragraph(
               "<b>Całkowity koszt robocizny (Do zapłaty):</b>",
               ParagraphStyle(
-                  'BoldSum', parent=cell_style, fontName='Helvetica-Bold'
+                  'BoldSum', parent=cell_style, fontName=FONT_BOLD_NAME
               ),
           ),
           Paragraph(
@@ -260,7 +278,7 @@ def generate_pdf(
               ParagraphStyle(
                   'BoldSumR',
                   parent=cell_right,
-                  fontName='Helvetica-Bold',
+                  fontName=FONT_BOLD_NAME,
                   fontSize=11,
               ),
           ),
@@ -280,22 +298,6 @@ def generate_pdf(
       ])
   )
   story.append(summary_table)
-
-  story.append(Spacer(1, 1.5 * cm))
-
-  # Podpisy
-  sig_data = [[
-      Paragraph("......................................................<br/>Podpis zleceniodawcy", cell_style),
-      Paragraph("......................................................<br/>Podpis wykonawcy", cell_right),
-  ]]
-  sig_table = Table(sig_data, colWidths=[8.5 * cm, 8.5 * cm])
-  sig_table.setStyle(
-      TableStyle([
-          ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-          ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
-      ])
-  )
-  story.append(sig_table)
 
   doc.build(story, canvasmaker=NumberedCanvas)
   buffer.seek(0)
@@ -334,210 +336,4 @@ if 'loaded_zlecenie_id' not in st.session_state:
 if selected_zlecenie_id != st.session_state['loaded_zlecenie_id']:
   st.session_state['loaded_zlecenie_id'] = selected_zlecenie_id
   if selected_zlecenie_id is not None:
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT project_name, client_name, address, order_date, default_rate, notes FROM zlecenia WHERE id = ?", (selected_zlecenie_id,))
-    z_data = cursor.fetchone()
-
-    cursor.execute("SELECT data_pracy, zakres_prac, godziny, stawka FROM pozycje_prac WHERE zlecenie_id = ?", (selected_zlecenie_id,))
-    p_data = cursor.fetchall()
-    conn.close()
-
-    if z_data:
-      st.session_state['project_name'] = z_data[0]
-      st.session_state['client_name'] = z_data[1]
-      st.session_state['address'] = z_data[2]
-      try:
-        st.session_state['order_date'] = datetime.strptime(z_data[3], "%Y-%m-%d").date()
-      except:
-        st.session_state['order_date'] = datetime.now().date()
-      st.session_state['default_rate'] = z_data[4]
-      st.session_state['notes'] = z_data[5]
-
-      loaded_tasks = []
-      for p in p_data:
-        p_date_val = datetime.strptime(p[0], "%Y-%m-%d").date() if p[0] else datetime.now().date()
-        loaded_tasks.append({"Data": p_date_val, "Zakres prac": p[1], "Godziny": p[2], "Stawka": p[3]})
-      
-      st.session_state['tasks_list'] = loaded_tasks
-      st.rerun()
-  else:
-    # Reset do domyślnych
-    st.session_state['project_name'] = "Montaż i uruchomienie instalacji"
-    st.session_state['client_name'] = "Jan Kowalski"
-    st.session_state['address'] = "ul. Przykładowa 1, Warszawa"
-    st.session_state['order_date'] = datetime.now().date()
-    st.session_state['default_rate'] = 100.0
-    st.session_state['notes'] = ""
-    today_str = datetime.now().date()
-    st.session_state['tasks_list'] = [
-        {"Data": today_str, "Zakres prac": "Pomiary i przygotowanie trasy kablowej", "Godziny": 3.0, "Stawka": 100.0},
-        {"Data": today_str, "Zakres prac": "Montaż osprzętu i podłączenia", "Godziny": 5.0, "Stawka": 100.0},
-    ]
-    st.rerun()
-
-# Ustawienia domyślne w session_state jeśli brak
-if 'project_name' not in st.session_state:
-  st.session_state['project_name'] = "Montaż i uruchomienie instalacji"
-if 'client_name' not in st.session_state:
-  st.session_state['client_name'] = "Jan Kowalski"
-if 'address' not in st.session_state:
-  st.session_state['address'] = "ul. Przykładowa 1, Warszawa"
-if 'order_date' not in st.session_state:
-  st.session_state['order_date'] = datetime.now().date()
-if 'default_rate' not in st.session_state:
-  st.session_state['default_rate'] = 100.0
-if 'notes' not in st.session_state:
-  st.session_state['notes'] = ""
-if 'tasks_list' not in st.session_state:
-  today_str = datetime.now().date()
-  st.session_state['tasks_list'] = [
-      {"Data": today_str, "Zakres prac": "Pomiary i przygotowanie trasy kablowej", "Godziny": 3.0, "Stawka": 100.0},
-      {"Data": today_str, "Zakres prac": "Montaż osprzętu i podłączenia", "Godziny": 5.0, "Stawka": 100.0},
-  ]
-
-# Sekcja 1: Dane zlecenia
-st.subheader("1. Informacje o zleceniu")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-  project_name = st.text_input("Nazwa zlecenia", value=st.session_state['project_name'])
-  client_name = st.text_input("Klient", value=st.session_state['client_name'])
-
-with col2:
-  order_date = st.date_input("Data zlecenia", value=st.session_state['order_date'])
-  default_rate = st.number_input("Domyślna stawka godzinowa (PLN)", min_value=0.0, value=float(st.session_state['default_rate']), step=10.0)
-
-with col3:
-  address = st.text_input("Adres realizacji", value=st.session_state['address'])
-  notes = st.text_area("Uwagi / Notatki", value=st.session_state['notes'], height=68)
-
-st.divider()
-
-# Sekcja 2: Edytor pozycji prac
-st.subheader("2. Zakres wykonanych prac i godziny")
-st.markdown("Dodawaj, edytuj lub usuwaj pozycje zrealizowanych prac oraz wybieraj datę wykonania.")
-
-df_tasks = pd.DataFrame(st.session_state['tasks_list'])
-if 'Data' not in df_tasks.columns:
-  df_tasks['Data'] = datetime.now().date()
-if 'Zakres prac' not in df_tasks.columns:
-  df_tasks['Zakres prac'] = ""
-if 'Godziny' not in df_tasks.columns:
-  df_tasks['Godziny'] = 0.0
-if 'Stawka' not in df_tasks.columns:
-  df_tasks['Stawka'] = default_rate
-
-edited_df = st.data_editor(
-    df_tasks,
-    num_rows="dynamic",
-    use_container_width=True,
-    column_config={
-        "Data": st.column_config.DateColumn("Data wykonania", format="YYYY-MM-DD", required=True),
-        "Zakres prac": st.column_config.TextColumn("Zakres / Opis wykonanych prac", required=True, width="large"),
-        "Godziny": st.column_config.NumberColumn("Ilość godzin", min_value=0.0, format="%.2f h", step=0.5),
-        "Stawka": st.column_config.NumberColumn("Stawka (PLN)", min_value=0.0, format="%.2f zł", step=5.0),
-    },
-)
-
-# Konwersja dat z edytora na obiekty daty i aktualizacja stanu
-for i, row in edited_df.iterrows():
-  if pd.isna(row['Data']):
-    edited_df.at[i, 'Data'] = datetime.now().date()
-  elif isinstance(row['Data'], str):
-    try:
-      edited_df.at[i, 'Data'] = datetime.strptime(row['Data'], "%Y-%m-%d").date()
-    except:
-      pass
-
-st.session_state['tasks_list'] = edited_df.to_dict('records')
-
-# Podsumowanie
-total_hours = edited_df['Godziny'].sum() if not edited_df.empty else 0.0
-total_amount = (edited_df['Godziny'] * edited_df['Stawka']).sum() if not edited_df.empty else 0.0
-
-st.markdown("### Podsumowanie")
-mcol1, mcol2 = st.columns(2)
-with mcol1:
-  st.metric(label="Łączna liczba godzin", value=f"{total_hours:.2f} h")
-with mcol2:
-  st.metric(label="Całkowita wartość robocizny", value=f"{total_amount:.2f} PLN")
-
-st.divider()
-
-# Przyciski akcji: Zapis do bazy oraz Generowanie PDF
-col_btn1, col_btn2 = st.columns(2)
-
-with col_btn1:
-  if st.button("💾 Zapisz / Aktualizuj zlecenie w bazie danych", type="secondary", use_container_width=True):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    if selected_zlecenie_id is not None:
-      cursor.execute(
-          """UPDATE zlecenia SET project_name=?, client_name=?, address=?, order_date=?, default_rate=?, notes=? WHERE id=?""",
-          (project_name, client_name, address, order_date.strftime("%Y-%m-%d"), default_rate, notes, selected_zlecenie_id),
-      )
-      cursor.execute("DELETE FROM pozycje_prac WHERE zlecenie_id = ?", (selected_zlecenie_id,))
-      zlecenie_id = selected_zlecenie_id
-    else:
-      cursor.execute(
-          """INSERT INTO zlecenia (project_name, client_name, address, order_date, default_rate, notes) VALUES (?, ?, ?, ?, ?, ?)""",
-          (project_name, client_name, address, order_date.strftime("%Y-%m-%d"), default_rate, notes),
-      )
-      zlecenie_id = cursor.lastrowid
-
-    # Zapis pozycji z datą
-    for row in st.session_state['tasks_list']:
-      if str(row['Zakres prac']).strip() != "":
-        d_val = row['Data'].strftime("%Y-%m-%d") if isinstance(row['Data'], (datetime, date)) else str(row['Data'])
-        cursor.execute(
-            """INSERT INTO pozycje_prac (zlecenie_id, data_pracy, zakres_prac, godziny, stawka) VALUES (?, ?, ?, ?, ?)""",
-            (zlecenie_id, d_val, row['Zakres prac'], float(row['Godziny']), float(row['Stawka'])),
-        )
-
-    conn.commit()
-    conn.close()
-    st.success("Zlecenie zostało pomyślnie zapisane w bazie danych!")
-    st.rerun()
-
-with col_btn2:
-  if st.button("📄 Generuj podsumowanie w formacie PDF", type="primary", use_container_width=True):
-    if edited_df.empty or total_hours == 0:
-      st.warning("Dodaj przynajmniej jedną pozycję prac z określoną liczbą godzin przed wygenerowaniem PDF.")
-    else:
-      # Przygotowanie danych do PDF (konwersja dat na stringi)
-      tasks_for_pdf = []
-      for row in st.session_state['tasks_list']:
-        d_val = row['Data'].strftime("%Y-%m-%d") if isinstance(row['Data'], (datetime, date)) else str(row['Data'])
-        tasks_for_pdf.append({
-            "Data": d_val,
-            "Zakres prac": row['Zakres prac'],
-            "Godziny": row['Godziny'],
-            "Stawka": row['Stawka']
-        })
-
-      client_data = {
-          "project_name": project_name,
-          "client_name": client_name,
-          "address": address,
-          "date": order_date,
-          "notes": notes,
-      }
-
-      pdf_bytes = generate_pdf(
-          client_data,
-          tasks_for_pdf,
-          total_hours,
-          total_amount,
-          default_rate,
-      )
-
-      st.success("Dokument PDF został wygenerowany pomyślnie!")
-      st.download_button(
-          label="📥 Pobierz kartę prac (PDF)",
-          data=pdf_bytes,
-          file_name=f"Karta_Prac_{project_name.replace(' ', '_')}.pdf",
-          mime="application/pdf",
-          use_container_width=True,
-      )
+    conn =
