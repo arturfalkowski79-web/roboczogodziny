@@ -1,1 +1,1 @@
-streamlit run roboczogodziny.py
+import streamlit as st
