@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 import io
 import sqlite3
 import pandas as pd
@@ -35,11 +35,12 @@ def init_db():
             notes TEXT
         )
     """)
-  # Tabela pozycji prac dla zleceń
+  # Tabela pozycji prac dla zleceń (dodano kolumnę data_pracy)
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS pozycje_prac (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             zlecenie_id INTEGER,
+            data_pracy TEXT,
             zakres_prac TEXT,
             godziny REAL,
             stawka REAL,
@@ -206,6 +207,7 @@ def generate_pdf(
 
   table_content = [[
       Paragraph("<b>Lp.</b>", cell_header_style),
+      Paragraph("<b>Data</b>", cell_header_style),
       Paragraph("<b>Zakres / Opis wykonanych prac</b>", cell_header_style),
       Paragraph("<b>Ilość godz.</b>", cell_header_right),
       Paragraph("<b>Stawka (PLN)</b>", cell_header_right),
@@ -216,6 +218,7 @@ def generate_pdf(
     val = row['Godziny'] * row['Stawka']
     table_content.append([
         Paragraph(str(idx), cell_style),
+        Paragraph(str(row['Data']), cell_style),
         Paragraph(str(row['Zakres prac']), cell_style),
         Paragraph(f"{row['Godziny']:.2f}", cell_right),
         Paragraph(f"{row['Stawka']:.2f}", cell_right),
@@ -223,7 +226,7 @@ def generate_pdf(
     ])
 
   tasks_table = Table(
-      table_content, colWidths=[1.0 * cm, 8.5 * cm, 2.5 * cm, 2.5 * cm, 2.5 * cm]
+      table_content, colWidths=[1.0 * cm, 2.3 * cm, 6.2 * cm, 2.5 * cm, 2.5 * cm, 2.5 * cm]
   )
   tasks_table.setStyle(
       TableStyle([
@@ -264,7 +267,7 @@ def generate_pdf(
       ],
   ]
 
-  summary_table = Table(summary_data, colWidths=[11.0 * cm, 6.0 * cm])
+  summary_table = Table(summary_data, colWidths=[11.5 * cm, 5.5 * cm])
   summary_table.setStyle(
       TableStyle([
           ('BACKGROUND', (0, 0), (-1, -1), '#f1f5f9'),
@@ -336,7 +339,7 @@ if selected_zlecenie_id != st.session_state['loaded_zlecenie_id']:
     cursor.execute("SELECT project_name, client_name, address, order_date, default_rate, notes FROM zlecenia WHERE id = ?", (selected_zlecenie_id,))
     z_data = cursor.fetchone()
 
-    cursor.execute("SELECT zakres_prac, godziny, stawka FROM pozycje_prac WHERE zlecenie_id = ?", (selected_zlecenie_id,))
+    cursor.execute("SELECT data_pracy, zakres_prac, godziny, stawka FROM pozycje_prac WHERE zlecenie_id = ?", (selected_zlecenie_id,))
     p_data = cursor.fetchall()
     conn.close()
 
@@ -351,9 +354,12 @@ if selected_zlecenie_id != st.session_state['loaded_zlecenie_id']:
       st.session_state['default_rate'] = z_data[4]
       st.session_state['notes'] = z_data[5]
 
-      st.session_state['tasks_list'] = [
-          {"Zakres prac": p[0], "Godziny": p[1], "Stawka": p[2]} for p in p_data
-      ]
+      loaded_tasks = []
+      for p in p_data:
+        p_date_val = datetime.strptime(p[0], "%Y-%m-%d").date() if p[0] else datetime.now().date()
+        loaded_tasks.append({"Data": p_date_val, "Zakres prac": p[1], "Godziny": p[2], "Stawka": p[3]})
+      
+      st.session_state['tasks_list'] = loaded_tasks
       st.rerun()
   else:
     # Reset do domyślnych
@@ -363,9 +369,10 @@ if selected_zlecenie_id != st.session_state['loaded_zlecenie_id']:
     st.session_state['order_date'] = datetime.now().date()
     st.session_state['default_rate'] = 100.0
     st.session_state['notes'] = ""
+    today_str = datetime.now().date()
     st.session_state['tasks_list'] = [
-        {"Zakres prac": "Pomiary i przygotowanie trasy kablowej", "Godziny": 3.0, "Stawka": 100.0},
-        {"Zakres prac": "Montaż osprzętu i podłączenia", "Godziny": 5.0, "Stawka": 100.0},
+        {"Data": today_str, "Zakres prac": "Pomiary i przygotowanie trasy kablowej", "Godziny": 3.0, "Stawka": 100.0},
+        {"Data": today_str, "Zakres prac": "Montaż osprzętu i podłączenia", "Godziny": 5.0, "Stawka": 100.0},
     ]
     st.rerun()
 
@@ -383,9 +390,10 @@ if 'default_rate' not in st.session_state:
 if 'notes' not in st.session_state:
   st.session_state['notes'] = ""
 if 'tasks_list' not in st.session_state:
+  today_str = datetime.now().date()
   st.session_state['tasks_list'] = [
-      {"Zakres prac": "Pomiary i przygotowanie trasy kablowej", "Godziny": 3.0, "Stawka": 100.0},
-      {"Zakres prac": "Montaż osprzętu i podłączenia", "Godziny": 5.0, "Stawka": 100.0},
+      {"Data": today_str, "Zakres prac": "Pomiary i przygotowanie trasy kablowej", "Godziny": 3.0, "Stawka": 100.0},
+      {"Data": today_str, "Zakres prac": "Montaż osprzętu i podłączenia", "Godziny": 5.0, "Stawka": 100.0},
   ]
 
 # Sekcja 1: Dane zlecenia
@@ -408,9 +416,11 @@ st.divider()
 
 # Sekcja 2: Edytor pozycji prac
 st.subheader("2. Zakres wykonanych prac i godziny")
-st.markdown("Dodawaj, edytuj lub usuwaj pozycje zrealizowanych prac w poniższej tabeli.")
+st.markdown("Dodawaj, edytuj lub usuwaj pozycje zrealizowanych prac oraz wybieraj datę wykonania.")
 
 df_tasks = pd.DataFrame(st.session_state['tasks_list'])
+if 'Data' not in df_tasks.columns:
+  df_tasks['Data'] = datetime.now().date()
 if 'Zakres prac' not in df_tasks.columns:
   df_tasks['Zakres prac'] = ""
 if 'Godziny' not in df_tasks.columns:
@@ -423,11 +433,22 @@ edited_df = st.data_editor(
     num_rows="dynamic",
     use_container_width=True,
     column_config={
+        "Data": st.column_config.DateColumn("Data wykonania", format="YYYY-MM-DD", required=True),
         "Zakres prac": st.column_config.TextColumn("Zakres / Opis wykonanych prac", required=True, width="large"),
         "Godziny": st.column_config.NumberColumn("Ilość godzin", min_value=0.0, format="%.2f h", step=0.5),
         "Stawka": st.column_config.NumberColumn("Stawka (PLN)", min_value=0.0, format="%.2f zł", step=5.0),
     },
 )
+
+# Konwersja dat z edytora na obiekty daty i aktualizacja stanu
+for i, row in edited_df.iterrows():
+  if pd.isna(row['Data']):
+    edited_df.at[i, 'Data'] = datetime.now().date()
+  elif isinstance(row['Data'], str):
+    try:
+      edited_df.at[i, 'Data'] = datetime.strptime(row['Data'], "%Y-%m-%d").date()
+    except:
+      pass
 
 st.session_state['tasks_list'] = edited_df.to_dict('records')
 
@@ -453,7 +474,6 @@ with col_btn1:
     cursor = conn.cursor()
 
     if selected_zlecenie_id is not None:
-      # Aktualizacja istniejącego
       cursor.execute(
           """UPDATE zlecenia SET project_name=?, client_name=?, address=?, order_date=?, default_rate=?, notes=? WHERE id=?""",
           (project_name, client_name, address, order_date.strftime("%Y-%m-%d"), default_rate, notes, selected_zlecenie_id),
@@ -461,19 +481,19 @@ with col_btn1:
       cursor.execute("DELETE FROM pozycje_prac WHERE zlecenie_id = ?", (selected_zlecenie_id,))
       zlecenie_id = selected_zlecenie_id
     else:
-      # Nowe zlecenie
       cursor.execute(
           """INSERT INTO zlecenia (project_name, client_name, address, order_date, default_rate, notes) VALUES (?, ?, ?, ?, ?, ?)""",
           (project_name, client_name, address, order_date.strftime("%Y-%m-%d"), default_rate, notes),
       )
       zlecenie_id = cursor.lastrowid
 
-    # Zapis pozycji
+    # Zapis pozycji z datą
     for row in st.session_state['tasks_list']:
-      if row['Zakres prac'].strip() != "":
+      if str(row['Zakres prac']).strip() != "":
+        d_val = row['Data'].strftime("%Y-%m-%d") if isinstance(row['Data'], (datetime, date)) else str(row['Data'])
         cursor.execute(
-            """INSERT INTO pozycje_prac (zlecenie_id, zakres_prac, godziny, stawka) VALUES (?, ?, ?, ?)""",
-            (zlecenie_id, row['Zakres prac'], float(row['Godziny']), float(row['Stawka'])),
+            """INSERT INTO pozycje_prac (zlecenie_id, data_pracy, zakres_prac, godziny, stawka) VALUES (?, ?, ?, ?, ?)""",
+            (zlecenie_id, d_val, row['Zakres prac'], float(row['Godziny']), float(row['Stawka'])),
         )
 
     conn.commit()
@@ -486,6 +506,17 @@ with col_btn2:
     if edited_df.empty or total_hours == 0:
       st.warning("Dodaj przynajmniej jedną pozycję prac z określoną liczbą godzin przed wygenerowaniem PDF.")
     else:
+      # Przygotowanie danych do PDF (konwersja dat na stringi)
+      tasks_for_pdf = []
+      for row in st.session_state['tasks_list']:
+        d_val = row['Data'].strftime("%Y-%m-%d") if isinstance(row['Data'], (datetime, date)) else str(row['Data'])
+        tasks_for_pdf.append({
+            "Data": d_val,
+            "Zakres prac": row['Zakres prac'],
+            "Godziny": row['Godziny'],
+            "Stawka": row['Stawka']
+        })
+
       client_data = {
           "project_name": project_name,
           "client_name": client_name,
@@ -496,7 +527,7 @@ with col_btn2:
 
       pdf_bytes = generate_pdf(
           client_data,
-          st.session_state['tasks_list'],
+          tasks_for_pdf,
           total_hours,
           total_amount,
           default_rate,
